@@ -35,14 +35,14 @@ pipeline {
     stage('Run Tests') {
       steps {
         echo "🧪 Running unit tests..."
-        sh 'npm test -- --watchAll=false || true'
+        sh 'npm test || true'
       }
     }
 
     stage('Archive Build') {
       steps {
-        echo "📦 Archiving build artifacts..."
-        archiveArtifacts artifacts: 'build/**', fingerprint: true
+        echo "📦 Archiving dist artifacts..."
+        archiveArtifacts artifacts: 'dist/**', fingerprint: true
       }
     }
 
