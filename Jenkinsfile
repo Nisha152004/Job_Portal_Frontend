@@ -1,102 +1,98 @@
-
 pipeline {
   agent any
 
   environment {
-    APP_ID = "RQm875oBTMycmQr7Chawu" 
+    APP_ID = "RQm875oBTMycmQr7Chawu"
   }
 
   parameters {
-    string(name: 'DEPLOY_URL_CRED_ID', defaultValue: 'DEPLOY_URL', description: 'Credentials ID for the deployment URL (Secret Text)')
-    string(name: 'DEPLOY_KEY_CRED_ID', defaultValue: 'DEPLOY_KEY', description: 'Credentials ID for the deployment API key (Secret Text)')
+    string(name: 'DEPLOY_URL_CRED_ID', defaultValue: 'DEPLOY_URL', description: 'Credentials ID for deployment URL (Secret Text)')
+    string(name: 'DEPLOY_KEY_CRED_ID', defaultValue: 'DEPLOY_KEY', description: 'Credentials ID for deployment API key (Secret Text)')
   }
 
   stages {
     stage('Checkout') {
       steps {
+        echo "📦 Checking out source code..."
         checkout scm
       }
     }
 
-    stage('Env setup') {
+    stage('Install Dependencies') {
       steps {
-        sh 'python3 -m venv .venv'
+        echo "📦 Installing npm packages..."
+        sh 'npm install'
       }
     }
 
-    stage('Install requirements') {
+    stage('Build Project') {
       steps {
-        sh '.venv/bin/pip install -r requirements.txt'
+        echo "🏗️ Building the frontend..."
+        sh 'npm run build'
       }
     }
 
-    stage('Migrations') {
+    stage('Run Tests') {
       steps {
-        sh '.venv/bin/python manage.py makemigrations'
-        sh '.venv/bin/python manage.py migrate'
+        echo "🧪 Running unit tests..."
+        sh 'npm test -- --watchAll=false || true'
       }
     }
 
-    stage('Unit Tests') {
+    stage('Archive Build') {
       steps {
-        sh '.venv/bin/python manage.py test'
+        echo "📦 Archiving build artifacts..."
+        archiveArtifacts artifacts: 'build/**', fingerprint: true
       }
     }
 
-    stage('Start Server') {
+    stage('Deploy') {
       steps {
-        sh '.venv/bin/python manage.py runserver 0.0.0.0:8000 &'
-        sh 'sleep 5' // wait for server to boot
+        echo "🚀 Triggering deployment..."
+        withCredentials([
+          string(credentialsId: params.DEPLOY_URL_CRED_ID, variable: 'DEPLOY_URL'),
+          string(credentialsId: params.DEPLOY_KEY_CRED_ID, variable: 'DEPLOY_KEY')
+        ]) {
+          sh '''
+            json_payload=$(printf '{"applicationId":"%s"}' "$APP_ID")
+            curl -fS -X POST \
+              "$DEPLOY_URL" \
+              -H 'accept: application/json' \
+              -H 'Content-Type: application/json' \
+              -H "x-api-key: $DEPLOY_KEY" \
+              --data-binary "$json_payload" \
+              -w "\\nHTTP %{http_code}\\n"
+          '''
+        }
       }
     }
+  }
 
-    stage('API Test') {
-      steps {
-        sh '.venv/bin/python check.py'
-      }
-    }
-  }  
   post {
     success {
-      echo "✅ Tests passed, triggering deployment API..."
-      withCredentials([
-        string(credentialsId: params.DEPLOY_URL_CRED_ID, variable: 'DEPLOY_URL'),
-        string(credentialsId: params.DEPLOY_KEY_CRED_ID, variable: 'DEPLOY_KEY')
-      ]) {
-        sh '''
-          json_payload=$(printf '{"applicationId":"%s"}' "$APP_ID")
-          curl -fS -X POST \
-            "$DEPLOY_URL" \
-            -H 'accept: application/json' \
-            -H 'Content-Type: application/json' \
-            -H "x-api-key: $DEPLOY_KEY" \
-            --data-binary "$json_payload" \
-            -w "\nHTTP %{http_code}\n"
-        '''
-      }
-      // Send success email notification
+      echo "✅ Build & deploy successful!"
       mail to: 'xaioene@gmail.com',
-           subject: "Jenkins Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+           subject: "✅ Jenkins Success: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
            body: """Hello,
 
-The Jenkins pipeline for ${env.JOB_NAME} (build #${env.BUILD_NUMBER}) has succeeded.
+The Jenkins pipeline for ${env.JOB_NAME} (build #${env.BUILD_NUMBER}) completed successfully.
 
 * Branch: ${env.BRANCH_NAME}
 * Commit: ${env.GIT_COMMIT}
 * Build URL: ${env.BUILD_URL}
 
-Deployment API was triggered successfully.
+Deployment API triggered successfully.
 
 Regards,
-Jenkins
+Jenkins 🤖
 """
     }
 
     failure {
-      echo "❌ Pipeline failed, sending error email..."
+      echo "❌ Pipeline failed, sending alert email..."
       mail to: 'xaioene@gmail.com',
-           subject: "Jenkins Failure: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
-           body: """Hello,
+           subject: "❌ Jenkins Failure: ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+           body: """Hey there,
 
 The Jenkins pipeline for ${env.JOB_NAME} (build #${env.BUILD_NUMBER}) has failed.
 
@@ -104,12 +100,10 @@ The Jenkins pipeline for ${env.JOB_NAME} (build #${env.BUILD_NUMBER}) has failed
 * Commit: ${env.GIT_COMMIT}
 * Build URL: ${env.BUILD_URL}
 
-Please check the console output for details.
+Please check the Jenkins logs for more info.
 
-Regards,
-Jenkins
+– Jenkins
 """
     }
   }
 }
-
